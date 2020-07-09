@@ -17,9 +17,9 @@
 # ##### END GPL LICENSE BLOCK #####
 
 
-#Scriptname & version: Cardboy0's Retroactive Beautifier - V.1.1 
+#Scriptname & version: Cardboy0's Retroactive Beautifier - V.1.1.3 
 #Author: Cardboy0 (https://twitter.com/cardboy0)
-#Made for Blender 2.82
+#Made for Blender 2.83
 
 
 
@@ -96,7 +96,9 @@ mods_bind_each_frame = ['Your_modifier_name_here','something like CorrectiveSmoo
 
 #################################
 #############CHANGELOG###########
-
+#V 1.1.3
+#       - Fixed the bug that prevented this script from working.
+#       - Result object will now appear in the collection of the "calc" object.
 #V 1.1
 #       - Added actual information text being shown in the console
 #       - Completely rewrote the text at the beginning of the script.
@@ -180,6 +182,19 @@ def apply_modifiers(object, modifier_list = [], invert = False, delete_hidden = 
         for i in modifier_list:
             if i in object.modifiers.keys():
                 O.object.modifier_apply(override, apply_as='DATA', modifier = i)
+                
+#links and unlinks specified objects to the specified collections. To prevent bugs the objects should all share the same collections
+#example: link_objects(bpy.context.selected_objects, bpy.context.scene.collection.children['New_Collection'], [bpy.context.scene.collection.children['Old_Collection']])
+def link_objects(objects, link_to, unlink_to = []): #unlink_to needs to be a list (collections to unlink), None (unlink no collection), or not be specified at all (unlink all collections). link_to only uses one collection, so no list.
+    if unlink_to == []:
+        unlink_to = objects[0].users_collection    
+    elif unlink_to == None:
+        unlink_to = []
+    
+    for i in objects:
+        for x in unlink_to:
+            x.objects.unlink(i)
+        link_to.objects.link(i)
 #########################################################################
 
 
@@ -203,88 +218,81 @@ with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):  #this prevents 
     O.object.duplicate()
 
     #assigning the 2 duplicate objects to variables.
-    original_model = C.object
-    calc_model = C.selected_objects[1]
-    print('names:',original_model.name, calc_model.name)
+    for i in C.selected_objects:
+        if i == C.view_layer.objects.active:
+            Original_model = i
+        else:
+            Calc_model = i
 
     #exporting and importing the .mdd files as well as applying/deleting modifiers and changing VGroups
 
     #exporting and applying mods                                                         
-    select_objects([original_model])  
+    select_objects([Original_model])  
     O.export_shape.mdd (filepath = target_file, frame_start = first_frame, frame_end = last_frame)
-    select_objects([original_model])  
-    original_model.shape_key_clear()     #modifiers can't be applied when the object has shapekeys
-    apply_modifiers(object = original_model, delete_hidden = True)
+    select_objects([Original_model])  
+    Original_model.shape_key_clear()     #modifiers can't be applied when the object has shapekeys
+    apply_modifiers(object = Original_model, delete_hidden = True)
     O.anim.keyframe_clear_v3d() #clears all transformation keyframes of the object (Object -> animation -> clear keyframe). We might have to delete all keyframes though.
     O.object.parent_clear(type='CLEAR_KEEP_TRANSFORM')
     O.object.transform_apply(location=True, rotation=True, scale=True)
 
     ###importing
-    select_objects([original_model])
+    select_objects([Original_model])
     O.import_shape.mdd(filepath=target_file, frame_start = first_frame)
 
 
-    ###giving the original_model the visual modifiers of the calc_model, and deleting them from the calc_model. The only reason we move them from one object to the other one is that these lines are being added new to the RB script and the original version required the modifiers on the original_model. I could change that, but dont want to right now.
-    select_objects([calc_model, original_model])
+    ###giving the Original_model the visual modifiers of the Calc_model, and deleting them from the Calc_model. The only reason we move them from one object to the other one is that these lines are being added new to the RB script and the original version required the modifiers on the Original_model. I could change that, but dont want to right now.
+    select_objects([Calc_model, Original_model])
     O.object.make_links_data(type='MODIFIERS')
-    select_objects([calc_model])
-    for mods in calc_model.modifiers:
+    select_objects([Calc_model])
+    for mods in Calc_model.modifiers:
         O.object.modifier_remove(modifier = mods.name)
         
-    select_objects([original_model, calc_model])
+    select_objects([Original_model, Calc_model])
     ###############
 
 
-
-    #assigning the selected objects to variables
-    for i in C.selected_objects:
-        if i == C.view_layer.objects.active:
-            Original = i
-        else:
-            Baked = i 
-
-    select_objects([Original])
-    O.object.duplicate()
-    CopyOriginal = C.object #to prevent us seriously messing something up, we use a copy of the main_anim object instead of the original for the stuff this script does, and delete it at the end again.
-
-
     #this script depends on the objects shapekeys and their order instead of the actual keyframes to know what to do for each frame, so it "refreshes" them once by exporting/importing mdd itself.
-    for i in C.object.modifiers:
+    for i in Original_model.modifiers:
         i.show_viewport = False    #when exporting the mdd will save the exact way the object *looks* like in the viewport, so we need to disable all mods first
+    select_objects([Original_model])
     O.export_shape.mdd(filepath=target_file, frame_start=first_frame, frame_end=last_frame, fps=C.scene.render.fps, use_rest_frame=False)
     O.object.shape_key_remove(all=True)
     O.object.transform_apply(location=True, rotation=True, scale=True) #applying or clear doesn't matter, the transform values just have all to be default.
     O.import_shape.mdd(filepath=target_file, frame_start = first_frame, frame_step=1) #first shapekey (after basis) is now keyframed to 1 at first_frame
 
-
+    Calc_model.name = "RB_CALC"
+    Original_model.name = "RB_ORIGM"
+    
     #Instead of importing the calc animation as mdd as well, its animation will be shown with a mesh cache modifier on the same object that had the main_anim mdd imported. So one animation is shown through keyframed shapekeys, the other one through the mesh cache mod.
-    select_objects([Baked])
-    for i in C.object.modifiers:
+    for i in Calc_model.modifiers:
         i.show_viewport = False
+    select_objects([Calc_model])
+    
     O.export_shape.mdd(filepath=target_file, frame_start=first_frame, frame_end=last_frame, fps=C.scene.render.fps, use_rest_frame=False)
-    select_objects([CopyOriginal])
-    Mesh_Cache = CopyOriginal.modifiers.new(name="Mesh Cache", type='MESH_CACHE')
+    select_objects([Original_model])
+    Mesh_Cache = Original_model.modifiers.new(name="Mesh Cache", type='MESH_CACHE')
     Mesh_Cache.cache_format = 'MDD'
     Mesh_Cache.filepath = target_file
     Mesh_Cache.frame_start = first_frame
     Mesh_Cache.frame_scale = 1.0 #am not sure about that value but still set it to 1 just to be safe
 
     #duplicate_flatten() - which is an operator of the "Corrective Shape Keys" add-on and will be used later - also takes into account how an object looks, but creates a new object with that new topology instead. So we need to see that modified topology in the viewport.
-    for i in C.object.modifiers:
+    for i in Original_model.modifiers:
         i.show_viewport = True 
 
     #needs to be the first in stack order since stuff like corrective smooth doesnt take lower modifiers into account
-    for i in range(len(list(CopyOriginal.modifiers))):
+    for i in range(len(list(Original_model.modifiers))):
         O.object.modifier_move_up(modifier=Mesh_Cache.name)
 
     #mute all shapekeys. We only need the shapekeys to change the Basis-shapekey each frame to give modifiers like corrective smooth a new reference to work with, even when muted the new base will look like it had a value of 1.
-    for i in CopyOriginal.data.shape_keys.key_blocks:     
+    for i in Original_model.data.shape_keys.key_blocks:     
                         i.mute = True
 
     #clean up the mods_bind_each_frame - list to only include modifier names that the object actually has.
     #to compare them we need to make a list of the actual modifiers that only has the names of them though.
     mods_actual = []
-    for i in CopyOriginal.modifiers:
+    for i in Original_model.modifiers:
         mods_actual = mods_actual + [i.name]
     mods_copy = list(mods_bind_each_frame) #if you don't use the list argument they're both linked to the same list, which messes up the next for-loop as it removes elements while looping
     for i in mods_copy:
@@ -296,7 +304,7 @@ with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):  #this prevents 
     #getting the types to choose the right operators later on, they will have the same indices as the actual names of the modifiers in the mod list.
     modifier_types = []
     for i in mods_bind_each_frame:
-        modifier_types = modifier_types + [CopyOriginal.modifiers[i].type]
+        modifier_types = modifier_types + [Original_model.modifiers[i].type]
 
 
     frame_current_overall = first_frame
@@ -308,7 +316,7 @@ for x in range(last_frame - first_frame + 1):
     print('current frame:', frame_current_overall)
     with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):
         C.scene.frame_set(frame_current_overall)
-        delete_basis_SK(CopyOriginal)
+        delete_basis_SK(Original_model)
         
         #the deform modifiers that support binding (Corrective Smooth, Laplacian Deform, Surface Deform and Mesh Deform) all have a different operators for the binding so I had to write this ugly if-thing you see here.
         Mesh_Cache.show_viewport = False #the mesh-cache mod is the first one in the stack by default, meaning that if we don't disable it prior to binding it will count towards the bind as well.
@@ -317,19 +325,19 @@ for x in range(last_frame - first_frame + 1):
             index = index + 1
             if modifier_types[index] == 'CORRECTIVE_SMOOTH':
                 O.object.correctivesmooth_bind(modifier=mods_bind_each_frame[index])
-                if CopyOriginal.modifiers[mods_bind_each_frame[index]].is_bind == False:      #if it was unbound before, it's now bound, if it was already bound it has to be binded again since we unbound it (the binding-op only toggles between bind and unbind)
+                if Original_model.modifiers[mods_bind_each_frame[index]].is_bind == False:      #if it was unbound before, it's now bound, if it was already bound it has to be binded again since we unbound it (the binding-op only toggles between bind and unbind)
                     bpy.ops.object.correctivesmooth_bind(modifier=mods_bind_each_frame[index])
             elif modifier_types[index] == 'LAPLACIANDEFORM':
                 O.object.laplaciandeform_bind(modifier=mods_bind_each_frame[index])
-                if CopyOriginal.modifiers[mods_bind_each_frame[index]].is_bind == False:
+                if Original_model.modifiers[mods_bind_each_frame[index]].is_bind == False:
                     O.object.laplaciandeform_bind(modifier=mods_bind_each_frame[index])    
             elif modifier_types[index] == 'MESH_DEFORM':
                 O.object.meshdeform_bind(modifier=mods_bind_each_frame[index])
-                if CopyOriginal.modifiers[mods_bind_each_frame[index]].is_bound == False:     #notice that with this and the next modifier it's "is_bound" instead of "is_bind"
+                if Original_model.modifiers[mods_bind_each_frame[index]].is_bound == False:     #notice that with this and the next modifier it's "is_bound" instead of "is_bind"
                     O.object.meshdeform_bind(modifier=mods_bind_each_frame[index])
             elif modifier_types[index] == 'SURFACE_DEFORM':
                 O.object.surfacedeform_bind(modifier=mods_bind_each_frame[index])
-                if CopyOriginal.modifiers[mods_bind_each_frame[index]].is_bound == False:
+                if Original_model.modifiers[mods_bind_each_frame[index]].is_bound == False:
                     O.object.surfacedeform_bind(modifier=mods_bind_each_frame[index])
         Mesh_Cache.show_viewport = True
         
@@ -356,16 +364,16 @@ for x in range(last_frame - first_frame + 1):
                 frame_current = "0" + frame_current
                 if x < 10:
                     frame_current = "0" + frame_current #if frame_current was e.g. "7", it's now "0007"
-        C.object.data.shape_keys.key_blocks[-1].name = 'frame_'+frame_current
+        Applied_Dupl.data.shape_keys.key_blocks[-1].name = 'frame_'+frame_current
         
         #to see the shapekeys animated, they have to have a value of 1 for their respective frame, but a value of 0 all the other time.
         for i in [-1,0,1]:          
             C.scene.frame_set(frame_current_overall + i)
             if i != 0:
-                C.object.data.shape_keys.key_blocks[-1].value = 0
+                Applied_Dupl.data.shape_keys.key_blocks[-1].value = 0
             else:
-                C.object.data.shape_keys.key_blocks[-1].value = 1
-            C.object.data.shape_keys.key_blocks[-1].keyframe_insert(data_path = 'value')
+                Applied_Dupl.data.shape_keys.key_blocks[-1].value = 1
+            Applied_Dupl.data.shape_keys.key_blocks[-1].keyframe_insert(data_path = 'value')
         C.scene.frame_set(frame_current_overall)
         
         select_objects([Temp_Dupl])
@@ -374,13 +382,13 @@ for x in range(last_frame - first_frame + 1):
 
 
 with open(os.devnull, "w") as f, contextlib.redirect_stdout(f): 
-    select_objects([CopyOriginal, calc_model, original_model])
-    O.object.delete(use_global=False)    
-    #Original.hide_viewport = True
-    #Baked.hide_viewport = True        #disabled for now since it does hide them, but to unhide them you have to set hide_viewport to True in the console yourself again if you want to see them, since using the hide button doesn't work for some reason.
-    select_objects([Applied_Dupl])
     Applied_Dupl.name = "beautified result"
-        
+    link_objects([Applied_Dupl], Calc_model.users_collection[0])
+    select_objects([Original_model, Calc_model])
+    O.object.delete(use_global=False)    
+    #Original_model.hide_viewport = True
+    #Calc_model.hide_viewport = True        #disabled for now since it does hide them, but to unhide them you have to set hide_viewport to True in the console yourself again if you want to see them, since using the hide button doesn't work for some reason.
+    select_objects([Applied_Dupl])    
         
     C.scene.frame_set(default_frame)
 
