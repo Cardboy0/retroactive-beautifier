@@ -8,3 +8,5 @@ Visit https://www.deviantart.com/cardboy0 if you want to see more things by me o
 
 
 For older versions, go to https://github.com/Cardboy0/retroactive-beautifier/tree/old-versions .
+
+If you intend to analyse this script for whatever reason, I included a flowchart (.drawio). You can open it using the site https://app.diagrams.net/ .
