@@ -17,7 +17,7 @@
 # ##### END GPL LICENSE BLOCK #####
 
 
-#Scriptname & version: Cardboy0's Retroactive Beautifier - V.1.3.3 (I often forget to actually update this number so don't trust it)
+#Scriptname & version: Cardboy0's Retroactive Beautifier - V.1.4 (I often forget to actually update this number so don't trust it)
 #Author: Cardboy0 (https://twitter.com/cardboy0)
 #Made for Blender 2.83
 
@@ -38,6 +38,13 @@ use_animated_VGs = False    #Your "beauty modifiers" might use animated Vertex G
 
 animated_VGs = []           #You can specify which VGs are animated to further decrease the slowdown. Only matters if use_animated_VGs = True . If the list is empty, all VGs will be used.
 #Example: animated_VGs = ["Group.001", "SB-goal", "other VG"]
+
+
+
+use_border_VG = False       #This is mainly intended for the results of my SPS script (https://github.com/Cardboy0/Shrinkwrap-Project-supporter) . Your deformed model will need a vertex group called "RB.border". This option will give all its vertices a weight of 1, except the ones of the bulge - but the most outer row of vertices of the bulge gets a weight of 1 as well. This allows you to get rid of the very sharp edges by using this VG for a Corrective Smooth modifier with like 300 Repeats, while leaving all other verts of the bulge in their original shape. Because this is hard to understand, the script will create one extra object after half of the frames are done, which will have the modifierd RB.border VG for the current frame, so you can view it in weight paint mode and see what it actually looks like.
+
+border_thickness = 1        #the amount of outer rows of the bulge that get a weight of 1 in the "RB.border" VG. Default = 1
+
 
 
 
@@ -72,10 +79,14 @@ animated_VGs = []           #You can specify which VGs are animated to further d
 #10. Wait for it to finish. (If you want to see the progress, open the Blender System Console)
 
 #If you get an error, make sure that you undo the "Run Script" action in your Undo History. Otherwise things could get messy.
-#If Blender becomes *extremely* slow after this script has finished (e.g. you click on an object and blender freezes for several seconds), you should save the file and restart blender. I don't know why this happens, and I only encountered it when I used higher subdivisions for a Subdivision Surface modifier.
+
 
 #################################
 #############CHANGELOG###########
+#V 1.4
+#       - Got rid of the bug that slows down your blender session after finishing the script (when using high poly meshes for many frames).
+#       - added use_border_VG as an optional option. This allows for better smoothing of SPS (another script by me) results.
+#
 #V 1.3.3
 #       - Included an option that makes the script work with animated Vertex Groups (e.g. keyframed weights). Due to possible extreme slowness of this, it's disabled by default.
 #V 1.3
@@ -109,6 +120,7 @@ animated_VGs = []           #You can specify which VGs are animated to further d
 #########################################################################
 import bpy
 import os
+import math
 import contextlib
 
 print('##########################################################################')
@@ -135,6 +147,14 @@ def select_objects(object_list, active_object = None):
         C.view_layer.objects.active = object_list[0]
     else:
         C.view_layer.objects.active = active_object        
+
+#deletes objects and their meshes. If you just use the bpy.ops.delete(), the mesh will remain. This will mean that if you're script creates a new object each frame, you'll have one unassigned mesh for each frame when the script has finished and your session can become extremely slow.
+#example: delete_objects([Obj_cube, Obj_sphere])
+def delete_objects(object_list):
+    for obj in object_list:
+        mesh = obj.data
+        D.objects.remove(obj)
+        D.meshes.remove(mesh)
         
 #links and unlinks specified objects to the specified collections. To prevent bugs the objects should all share the same collections
 #example: link_objects(bpy.context.selected_objects, bpy.context.scene.collection.children['New_Collection'], [bpy.context.scene.collection.children['Old_Collection']])
@@ -211,6 +231,10 @@ with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):  #this prevents 
             beautymods += [[i, i.show_viewport]] #to safe their viewport visibility for resetting later
             i.show_viewport = False #remember to unset later again
 
+    #we must make sure that only vertex selection is possible in edit mode, otherwise problems will appear
+    O.object.mode_set_with_submode(mode='EDIT',  mesh_select_mode = {"VERT"} ) 
+    O.object.mode_set(mode='OBJECT')
+
     
     #creating copies of the two original objects that are only animated through keyframed shapekeys
     select_objects([Obj_orig])
@@ -252,7 +276,84 @@ with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):  #this prevents 
             Obj_working.modifiers.remove(i)
         else:
             i.show_viewport = True
+    
+    
+    
+    if use_border_VG == True:
+        
+        #needed for "resetting" VGs later
+        all_vert_indices = []
+        for i in Obj_defo_mdd.data.vertices:
+            all_vert_indices += [i.index]
 
+        for i in range(first_frame, last_frame + 1):
+            C.scene.frame_set(i)
+            print('current frame:', i)
+            deformed_verts = []
+            
+            
+            #creating static duplicates since shapekeys alone dont change vertex coordinates
+            select_objects([Obj_orig_mdd])
+            O.object.object_duplicate_flatten_modifiers()
+            Obj_t_orig = C.object
+            select_objects([Obj_defo_mdd])
+            O.object.object_duplicate_flatten_modifiers()
+            Obj_t_defo = C.object
+            
+            
+            #comparing vertices of both objects to see which ones have been deformed
+            for e in range(len(Obj_t_orig.data.vertices)):
+                for f in [0,1,2]:
+                    if not math.isclose(Obj_t_orig.data.vertices[e].co[f], Obj_t_defo.data.vertices[e].co[f], abs_tol=0.00001):
+                        deformed_verts += [e]
+                        break
+            
+
+            
+            #Obj_working will get a new VG for each frame
+            VG_new = Obj_working.vertex_groups.new(name = "RB_bord_frame_" + str(i))
+            #for some reason creating new VGs sometimes already has certain areas assigned with a weight of 1, so we have to remove all verts at first to be sure
+            VG_new.remove(all_vert_indices)
+            VG_new.add(deformed_verts, 1, "ADD")
+            
+
+            select_objects([Obj_working])
+            O.object.mode_set(mode='EDIT')
+            Obj_working.vertex_groups.active = VG_new
+            O.mesh.select_all(action='DESELECT')
+            O.object.vertex_group_select()
+            for e in range(border_thickness):
+                O.mesh.select_less()
+            C.scene.tool_settings.vertex_group_weight = 1
+            
+            mode = "INNER_INVERT"
+            if mode == "INNER":
+                O.object.vertex_group_assign()
+                O.mesh.select_all(action='INVERT')
+                O.object.vertex_group_remove_from()
+            elif mode == "INNER_INVERT":
+                O.object.vertex_group_remove_from()
+                O.mesh.select_all(action='INVERT')
+                O.object.vertex_group_assign()
+            
+            O.object.mode_set(mode='OBJECT')    
+    
+            if i != int((last_frame-first_frame)/2+first_frame):
+                delete_objects([Obj_t_defo, Obj_t_orig])
+            else:
+                delete_objects([Obj_t_orig])
+                Obj_t_defo.name = "border_VG for frame " + str(i) +" (example)"
+                select_objects([Obj_working, Obj_t_defo])
+                O.object.vertex_group_copy_to_selected()
+                for e in Obj_t_defo.vertex_groups:
+                    if e != Obj_t_defo.vertex_groups.get("RB_bord_frame_" + str(i)):
+                        Obj_t_defo.vertex_groups.remove(e)
+                Obj_t_defo.vertex_groups[0].name = "RB.border"
+    
+        VG_border = Obj_working.vertex_groups.get("RB.border")
+    
+    
+     
     #Beauty mods might use VGs whose weights change with frames. To "update" those weights, we'll have to transfer those specified vertex groups with a Data Transfer modifier (IF ENABLED). It needs to be the first modifier in the stack. It also overwrites all exisiting weights.
     if use_animated_VGs == True:
         #adds one data transfer mod for all VGs
@@ -288,7 +389,14 @@ for i in range(first_frame, last_frame + 1):
     C.scene.frame_set(i)
     print('current frame:', i)
         
-    with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):    
+    with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):
+
+        if use_border_VG == True:
+            Obj_working.vertex_groups.remove(VG_border)
+            VG_border = Obj_working.vertex_groups.get("RB_bord_frame_" + str(i))
+            VG_border.name = "RB.border"
+
+    
         Obj_working.shape_key_clear()
         
         #changing the Basis shape to the current shape of Obj_orig
@@ -332,8 +440,7 @@ for i in range(first_frame, last_frame + 1):
         Obj_temp = C.object
         select_objects([Obj_beauty, Obj_temp])   #apparentely join_shapes doesn't work for all mods! Thus, always create duplicate_for_editing first instead
         bpy.ops.object.join_shapes()
-        select_objects([Obj_temp])
-        O.object.delete(use_global=False)
+        delete_objects([Obj_temp])
         SK_new = Obj_beauty.data.shape_keys.key_blocks[-1]
      
         #naming the new shapekey: For the possibility that you want to join your result with another object later on (which also is animated through mdd), the shapekeys have to have the same names, so this script tries to name them the same way mdd does by default when importing.
@@ -354,8 +461,7 @@ for i in range(first_frame, last_frame + 1):
             SK_new.keyframe_insert(data_path = 'value')
     
 with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):    
-    select_objects([Obj_orig_mdd, Obj_defo_mdd, Obj_working])
-    O.object.delete(use_global=False)
+    delete_objects([Obj_orig_mdd, Obj_defo_mdd, Obj_working])
 
     #linking objs to collection of Obj_defo
     link_objects([Obj_beauty], Obj_defo.users_collection[0])
@@ -368,5 +474,6 @@ with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):
     for i in beautymods:
         i[0].show_viewport = i[1]
     C.scene.frame_set(default_frame)
+    
     
 print('\n\n'+2*print_symbol_asterik+'\nScript finished!\n\n'+2*print_symbol_asterik+'\n\n\n\n\n\n')
